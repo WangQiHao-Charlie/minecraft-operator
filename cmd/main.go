@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	minecraftv1 "git.charlie-cloud.me/Charlie/minecraft-operator-v2/api/v1"
-	"git.charlie-cloud.me/Charlie/minecraft-operator-v2/internal/controller"
+	minecraftv1 "github.com/WangQiHao-Charlie/minecraft-operator/api/v1"
+	"github.com/WangQiHao-Charlie/minecraft-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
