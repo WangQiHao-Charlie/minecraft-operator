@@ -1,0 +1,261 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: servers.minecraft.charlie-cloud.me
+spec:
+  group: minecraft.charlie-cloud.me
+  names:
+    kind: Server
+    listKind: ServerList
+    plural: servers
+    singular: server
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Server is the Schema for the servers API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ServerSpec defines the desired state of Server
+            properties:
+              debug:
+                description: Debug settings for the server pod.
+                properties:
+                  enabled:
+                    description: Enable debug sidecar and its Service.
+                    type: boolean
+                type: object
+              hardware:
+                description: Hardware resources allocation
+                properties:
+                  cpu_count:
+                    description: "Instance CPU limit\t(mCPU)"
+                    maximum: 16000
+                    minimum: 500
+                    type: integer
+                  high_freq:
+                    description: Schedule Tag
+                    type: boolean
+                  io_throttle:
+                    type: integer
+                  memory_size:
+                    description: Instance Memory Limit (MB)
+                    maximum: 32768
+                    minimum: 512
+                    type: integer
+                  storage_class:
+                    type: string
+                  storage_size:
+                    description: Instance PVC Size
+                    maximum: 51200
+                    minimum: 1024
+                    type: integer
+                required:
+                - cpu_count
+                - memory_size
+                - storage_size
+                type: object
+              java_version:
+                description: Java version
+                type: string
+              minecraft:
+                description: Minecraft-specific config
+                properties:
+                  configRef:
+                    description: 'Optional: Quote external ConfigMap'
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  difficulty:
+                    type: string
+                  enable_rcon:
+                    description: Enable RCON
+                    type: boolean
+                  eula:
+                    enum:
+                    - "TRUE"
+                    - "FALSE"
+                    type: string
+                  level_name:
+                    type: string
+                  modpack:
+                    description: modpack source
+                    properties:
+                      auto_update:
+                        type: boolean
+                      checksum:
+                        type: string
+                      type:
+                        enum:
+                        - S3
+                        - HTTP
+                        - Local
+                        type: string
+                      url:
+                        type: string
+                    required:
+                    - type
+                    - url
+                    type: object
+                  motd:
+                    type: string
+                  online_mode:
+                    type: boolean
+                  rcon_password:
+                    type: string
+                  type:
+                    enum:
+                    - VANILLA
+                    - PAPER
+                    - FORGE
+                    - FABRIC
+                    - SPIGOT
+                    type: string
+                  version:
+                    description: Minecraft server version, e.g., "1.21.1"
+                    type: string
+                required:
+                - eula
+                - type
+                type: object
+              server_id:
+                description: Server Unique ID
+                type: string
+              server_name:
+                description: Server Name is the display name of the server
+                type: string
+              snapshotPolicy:
+                description: Snapshot Policy
+                properties:
+                  auto_backup:
+                    description: Automatic backup snapshot
+                    type: boolean
+                  auto_restore:
+                    description: Enable Restore
+                    type: boolean
+                  enabled:
+                    description: Enable Snapshot
+                    type: boolean
+                  last_snapshot_id:
+                    type: string
+                  storage_url:
+                    description: e.g. s3://minecraft-snapshots/survival-latest.snap
+                    type: string
+                required:
+                - auto_backup
+                - auto_restore
+                - enabled
+                type: object
+            required:
+            - hardware
+            type: object
+          status:
+            description: ServerStatus defines the observed state of Server.
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the Server resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
