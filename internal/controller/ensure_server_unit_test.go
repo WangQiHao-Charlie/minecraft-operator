@@ -229,6 +229,127 @@ func TestReconcileTogglesDebugWebDAVSidecarAndService(t *testing.T) {
 	}
 }
 
+func TestReconcileAdoptsExistingStatefulSetWithExistingPVC(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+
+	if err := minecraftv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add minecraft scheme: %v", err)
+	}
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add apps scheme: %v", err)
+	}
+	if err := v1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+
+	server := newTestServer()
+	server.Name = "mc"
+	server.Namespace = "minecraft"
+	server.Spec.HardwareResource.ExistingClaimName = "mc-data"
+
+	existingStatefulSet := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      server.Name,
+			Namespace: server.Namespace,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			ServiceName: server.Name,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": server.Name},
+			},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": server.Name},
+				},
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name:  minecraftContainerName,
+							Image: "itzg/minecraft-server:java17",
+							VolumeMounts: []v1.VolumeMount{
+								{
+									Name:      "mc-data",
+									MountPath: minecraftDataMountPath,
+								},
+							},
+						},
+					},
+					Volumes: []v1.Volume{
+						{
+							Name: "mc-data",
+							VolumeSource: v1.VolumeSource{
+								PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "mc-data",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	existingService := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      server.Name,
+			Namespace: server.Namespace,
+		},
+		Spec: v1.ServiceSpec{
+			Selector: map[string]string{"app": server.Name},
+			Ports: []v1.ServicePort{
+				{
+					Name: minecraftPortName,
+					Port: minecraftPort,
+				},
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(server, existingStatefulSet, existingService).Build()
+	reconciler := &ServerReconciler{Client: client, Scheme: scheme}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: server.Name, Namespace: server.Namespace}}
+
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("reconcile with existing pvc-backed statefulset: %v", err)
+	}
+
+	var adoptedStatefulSet appsv1.StatefulSet
+	if err := client.Get(ctx, req.NamespacedName, &adoptedStatefulSet); err != nil {
+		t.Fatalf("get adopted statefulset: %v", err)
+	}
+	if !metav1.IsControlledBy(&adoptedStatefulSet, server) {
+		t.Fatalf("expected statefulset to be controlled by server")
+	}
+	if len(adoptedStatefulSet.Spec.VolumeClaimTemplates) != 0 {
+		t.Fatalf("expected no volumeClaimTemplates, got %#v", adoptedStatefulSet.Spec.VolumeClaimTemplates)
+	}
+	if len(adoptedStatefulSet.Spec.Template.Spec.Volumes) != 1 {
+		t.Fatalf("expected one volume, got %#v", adoptedStatefulSet.Spec.Template.Spec.Volumes)
+	}
+	volume := adoptedStatefulSet.Spec.Template.Spec.Volumes[0]
+	if got, want := volume.Name, minecraftDataVolumeName; got != want {
+		t.Fatalf("unexpected volume name: got %q want %q", got, want)
+	}
+	if volume.PersistentVolumeClaim == nil || volume.PersistentVolumeClaim.ClaimName != "mc-data" {
+		t.Fatalf("unexpected persistentVolumeClaim: %#v", volume.PersistentVolumeClaim)
+	}
+	container, ok := findContainer(adoptedStatefulSet.Spec.Template.Spec.Containers, minecraftContainerName)
+	if !ok {
+		t.Fatalf("expected minecraft container to exist")
+	}
+	if len(container.VolumeMounts) != 1 || container.VolumeMounts[0].Name != minecraftDataVolumeName {
+		t.Fatalf("unexpected adopted volume mounts: %#v", container.VolumeMounts)
+	}
+
+	var adoptedService v1.Service
+	if err := client.Get(ctx, req.NamespacedName, &adoptedService); err != nil {
+		t.Fatalf("get adopted service: %v", err)
+	}
+	if !metav1.IsControlledBy(&adoptedService, server) {
+		t.Fatalf("expected service to be controlled by server")
+	}
+}
+
 func newTestServer() *minecraftv1.Server {
 	return &minecraftv1.Server{
 		ObjectMeta: metav1.ObjectMeta{

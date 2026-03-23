@@ -18,11 +18,13 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	minecraftv1 "github.com/WangQiHao-Charlie/minecraft-operator/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +40,8 @@ type Step func(ctx context.Context, server *minecraftv1.Server, r *ServerReconci
 // +kubebuilder:rbac:groups=minecraft.charlie-cloud.me,resources=servers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=minecraft.charlie-cloud.me,resources=servers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=minecraft.charlie-cloud.me,resources=servers/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=configmaps;services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -75,4 +79,20 @@ func (r *ServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&v1.Service{}).
 		Named("server").
 		Complete(r)
+}
+
+func (r *ServerReconciler) ensureControllerReference(owner *minecraftv1.Server, obj client.Object) (bool, error) {
+	if metav1.IsControlledBy(obj, owner) {
+		return false, nil
+	}
+
+	if controller := metav1.GetControllerOf(obj); controller != nil && controller.UID != owner.UID {
+		return false, fmt.Errorf("%T %s/%s is already controlled by %s %q", obj, obj.GetNamespace(), obj.GetName(), controller.Kind, controller.Name)
+	}
+
+	if err := ctrl.SetControllerReference(owner, obj, r.Scheme); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

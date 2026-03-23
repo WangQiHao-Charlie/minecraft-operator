@@ -88,6 +88,10 @@ type HardwareSpec struct {
 	// +kubebuilder:validation:Maximum=51200
 	StorageSize int `json:"storage_size"`
 
+	// Adopt and mount an existing PVC instead of creating a StatefulSet volumeClaimTemplate.
+	// +optional
+	ExistingClaimName string `json:"existing_claim_name,omitempty"`
+
 	// Instance Memory Limit (MB)
 	// +kubebuilder:validation:Minimum=512
 	// +kubebuilder:validation:Maximum=32768

@@ -44,6 +44,7 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 		return err
 	}
 	desiredContainers := buildPodContainers(server)
+	desiredVolumes := buildPodVolumes(server)
 
 	var statefulset appsv1.StatefulSet
 	err = r.Get(ctx, types.NamespacedName{
@@ -62,6 +63,7 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 				Namespace: server.Namespace,
 			},
 			Spec: appsv1.StatefulSetSpec{
+				ServiceName:    server.Name,
 				UpdateStrategy: appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType},
 				Selector: &metav1.LabelSelector{
 					MatchLabels: labels,
@@ -75,22 +77,10 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 					},
 					Spec: v1.PodSpec{
 						Containers: desiredContainers,
+						Volumes:    desiredVolumes,
 					},
 				},
-				VolumeClaimTemplates: []v1.PersistentVolumeClaim{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: minecraftDataVolumeName},
-						Spec: v1.PersistentVolumeClaimSpec{
-							StorageClassName: &server.Spec.HardwareResource.StorageClassName,
-							AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
-							Resources: v1.VolumeResourceRequirements{
-								Requests: v1.ResourceList{
-									v1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dMi", server.Spec.HardwareResource.StorageSize)),
-								},
-							},
-						},
-					},
-				},
+				VolumeClaimTemplates: buildVolumeClaimTemplates(server),
 			},
 		}
 
@@ -106,6 +96,25 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 	}
 
 	updated := false
+	if ownerUpdated, err := r.ensureControllerReference(server, &statefulset); err != nil {
+		return err
+	} else if ownerUpdated {
+		updated = true
+	}
+
+	if statefulset.Spec.ServiceName == "" {
+		statefulset.Spec.ServiceName = server.Name
+		updated = true
+	} else if statefulset.Spec.ServiceName != server.Name {
+		return fmt.Errorf("statefulset %s/%s uses serviceName %q, expected %q", statefulset.Namespace, statefulset.Name, statefulset.Spec.ServiceName, server.Name)
+	}
+
+	if statefulset.Spec.Selector == nil {
+		return fmt.Errorf("statefulset %s/%s is missing spec.selector", statefulset.Namespace, statefulset.Name)
+	}
+	if !equality.Semantic.DeepEqual(statefulset.Spec.Selector.MatchLabels, labels) {
+		return fmt.Errorf("statefulset %s/%s selector %v does not match expected labels %v", statefulset.Namespace, statefulset.Name, statefulset.Spec.Selector.MatchLabels, labels)
+	}
 
 	if statefulset.Spec.Template.Labels == nil {
 		statefulset.Spec.Template.Labels = map[string]string{}
@@ -122,6 +131,12 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 	}
 	if statefulset.Spec.Template.Annotations[podTemplateHashAnnotation] != templateHash {
 		statefulset.Spec.Template.Annotations[podTemplateHashAnnotation] = templateHash
+		updated = true
+	}
+
+	if storageUpdated, err := reconcileStorage(server, &statefulset, desiredVolumes); err != nil {
+		return err
+	} else if storageUpdated {
 		updated = true
 	}
 
@@ -142,6 +157,44 @@ func (r *ServerReconciler) ensureServer(ctx context.Context, server *minecraftv1
 	}
 
 	return r.ensureDebugService(ctx, server, labels)
+}
+
+func buildPodVolumes(server *minecraftv1.Server) []v1.Volume {
+	if server.Spec.HardwareResource.ExistingClaimName == "" {
+		return nil
+	}
+
+	return []v1.Volume{
+		{
+			Name: minecraftDataVolumeName,
+			VolumeSource: v1.VolumeSource{
+				PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+					ClaimName: server.Spec.HardwareResource.ExistingClaimName,
+				},
+			},
+		},
+	}
+}
+
+func buildVolumeClaimTemplates(server *minecraftv1.Server) []v1.PersistentVolumeClaim {
+	if server.Spec.HardwareResource.ExistingClaimName != "" {
+		return nil
+	}
+
+	return []v1.PersistentVolumeClaim{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: minecraftDataVolumeName},
+			Spec: v1.PersistentVolumeClaimSpec{
+				StorageClassName: &server.Spec.HardwareResource.StorageClassName,
+				AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
+				Resources: v1.VolumeResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceStorage: resource.MustParse(fmt.Sprintf("%dMi", server.Spec.HardwareResource.StorageSize)),
+					},
+				},
+			},
+		},
+	}
 }
 
 func buildPodContainers(server *minecraftv1.Server) []v1.Container {
@@ -180,6 +233,27 @@ func buildMinecraftContainer(server *minecraftv1.Server) v1.Container {
 			},
 		},
 	}
+}
+
+func reconcileStorage(server *minecraftv1.Server, statefulset *appsv1.StatefulSet, desiredVolumes []v1.Volume) (bool, error) {
+	if server.Spec.HardwareResource.ExistingClaimName != "" {
+		updated := false
+		if len(statefulset.Spec.VolumeClaimTemplates) > 0 {
+			return false, fmt.Errorf("statefulset %s/%s already uses volumeClaimTemplates and cannot switch to existing_claim_name=%q in place", statefulset.Namespace, statefulset.Name, server.Spec.HardwareResource.ExistingClaimName)
+		}
+		if !equality.Semantic.DeepEqual(statefulset.Spec.Template.Spec.Volumes, desiredVolumes) {
+			statefulset.Spec.Template.Spec.Volumes = desiredVolumes
+			updated = true
+		}
+
+		return updated, nil
+	}
+
+	if len(statefulset.Spec.VolumeClaimTemplates) == 0 && len(statefulset.Spec.Template.Spec.Volumes) > 0 {
+		return false, fmt.Errorf("statefulset %s/%s mounts existing PVCs; set spec.hardware.existing_claim_name to adopt it or recreate the StatefulSet under operator control", statefulset.Namespace, statefulset.Name)
+	}
+
+	return false, nil
 }
 
 func buildDebugWebDAVContainer() v1.Container {
@@ -363,6 +437,11 @@ func (r *ServerReconciler) ensureService(ctx context.Context, server *minecraftv
 	}, &service)
 	if err == nil {
 		updated := false
+		if ownerUpdated, err := r.ensureControllerReference(server, &service); err != nil {
+			return err
+		} else if ownerUpdated {
+			updated = true
+		}
 		if !equality.Semantic.DeepEqual(service.Annotations, desired.Annotations) {
 			service.Annotations = desired.Annotations
 			updated = true

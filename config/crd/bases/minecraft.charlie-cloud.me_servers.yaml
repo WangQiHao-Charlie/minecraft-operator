@@ -54,6 +54,10 @@ spec:
                     maximum: 16000
                     minimum: 500
                     type: integer
+                  existing_claim_name:
+                    description: Adopt and mount an existing PVC instead of creating
+                      a StatefulSet volumeClaimTemplate.
+                    type: string
                   high_freq:
                     description: Schedule Tag
                     type: boolean

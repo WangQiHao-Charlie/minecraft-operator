@@ -72,9 +72,20 @@ func (r *ServerReconciler) ensureGameSetting(ctx context.Context, server *minecr
 	}
 
 	if equality.Semantic.DeepEqual(configMap.Data, data) {
-		return nil
+		updated, err := r.ensureControllerReference(server, &configMap)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return nil
+		}
+
+		return r.Update(ctx, &configMap)
 	}
 
 	configMap.Data = data
+	if _, err := r.ensureControllerReference(server, &configMap); err != nil {
+		return err
+	}
 	return r.Update(ctx, &configMap)
 }

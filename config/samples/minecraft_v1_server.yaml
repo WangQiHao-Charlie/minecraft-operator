@@ -11,6 +11,7 @@ spec:
     memory_size: 2048
     cpu_count: 1000
     storage_class: standard
+    # existing_claim_name: mc-data
   java_version: "21"
   minecraft:
     eula: "TRUE"
